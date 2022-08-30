@@ -5,7 +5,7 @@
 
 module Data.Type.Set (Set(Empty, Ext), ToSet, Union, Insert, Unionable, union, quicksort, append,
                       Sortable, Split(..), Nubable(..), asSet, Subset(..),
-                      Delete, remove, Remove, Elem(..), Member(..), SetProperties,
+                      Delete, Difference, Intersection, remove, Remove, Elem(..), Member(..), SetProperties,
                       module Data.Type.List, Proxy(Proxy)) where
 
 import Data.Type.Bool
