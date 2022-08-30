@@ -3,15 +3,13 @@
              FlexibleContexts, UndecidableInstances, ConstraintKinds,
              ScopedTypeVariables, TypeInType #-}
 
-module Data.Type.Set (Set(..), Union, Unionable, union, quicksort, append,
-                      Sort, Sortable, (:++), Split(..), Cmp, Filter, Flag(..),
-                      Nub, Nubable(..), AsSet, asSet, IsSet, Subset(..),
-                      Delete(..), Proxy(..), remove, Remove, (:\),
-                      Elem(..), Member(..), MemberP, NonMember) where
+module Data.Type.Set (Set(..), Union, Insert, Unionable, union, quicksort, append,
+                      Sortable, Split(..), Nubable(..), asSet, Subset(..),
+                      Delete, remove, Remove, Elem(..), Member(..), SetProperties) where
 
-import GHC.TypeLits
 import Data.Type.Bool
 import Data.Type.Equality
+import Data.Type.List
 import Data.Proxy (Proxy(Proxy))
 
 -- Value-level 'Set' representation,  essentially a list
@@ -50,66 +48,121 @@ instance (Ord a, Ord (Set s)) => Ord (Set (a ': s)) where
     other ->
       other
 
-{-| At the type level, normalise the list form to the set form -}
-type AsSet s = Nub (Sort s)
+-- | At the type level, normalise the list form to the set form
+--
+--     > :kind! ToSet ["B", "B", "A"]
+--     ToSet ["B", "B", "A"] :: *
+--     = Set '["A", "B"]
+type ToSet xs = Set (AsSet xs)
 
-{-| At the value level, noramlise the list form to the set form -}
-asSet :: (Sortable s, Nubable (Sort s)) => Set s -> Set (AsSet s)
-asSet x = nub (quicksort x)
+type Delete x xs = Difference xs (ToSet '[x])
 
-{-| Predicate to check if in the set form -}
-type IsSet s = (s ~ Nub (Sort s))
+-- | > :kind! Difference (Set '["A", "B"]) (Set '["B"])
+-- Difference (Set '["A", "B"]) (Set '["B"]) :: *
+-- = Set '["A"]
+type family Difference a b where
+  Difference (Set xs) (Set ys) = Set (SubtractSortedLists xs ys)
 
-{-| Useful properties to be able to refer to someties -}
-type SetProperties (f :: [k]) =
-  ( Union f ('[] :: [k]) ~ f,
-    Split f ('[] :: [k]) f,
-    Union ('[] :: [k]) f ~ f,
-    Split ('[] :: [k]) f f,
-    Union f f ~ f,
-    Split f f f,
-    Unionable f ('[] :: [k]),
-    Unionable ('[] :: [k]) f
-  )
-{-- Union --}
+type family Union a b where
+  Union (Set '[]) s = s
+  Union s (Set '[]) = s
+  Union (Set xs) (Set ys) = ToSet (xs :++ ys)
+  -- Union (Set (x ': xs)) (Set ys) = Union (Set xs) (Set (If (MemberP x ys) ys (x ': ys)))
+  -- Union (Set xs) (Set ys) = Set (UnionLists xs ys)
 
-{-| Union of sets -}
-type Union s t = Nub (Sort (s :++ t))
+type family Intersection a b where
+  Intersection (Set '[]) s = Set '[]
+  Intersection s (Set '[]) = Set '[]
+  Intersection (Set (x ': xs)) (Set ys) =
+    Union (If (MemberP x ys) (Set '[x]) (Set '[])) (Intersection (Set xs) (Difference (Set ys) (Set '[x])))
 
-union :: (Unionable s t) => Set s -> Set t -> Set (Union s t)
-union s t = nub (quicksort (append s t))
+type Insert x s = Union (Set '[x]) s
 
-type Unionable s t = (Sortable (s :++ t), Nubable (Sort (s :++ t)))
+
+{-| Value-level counterpart to the type-level 'Nub'
+    Note: the value-level case for equal types is not define here,
+          but should be given per-application, e.g., custom 'merging' behaviour may be required -}
 
-{-| List append (essentially set disjoint union) -}
-type family (:++) (x :: [k]) (y :: [k]) :: [k] where
-            '[]       :++ xs = xs
-            (x ': xs) :++ ys = x ': (xs :++ ys)
+class Nubable t where
+    nub :: Set t -> Set (Nub t)
 
-infixr 5 :++
+instance Nubable '[] where
+    nub Empty = Empty
+
+instance Nubable '[e] where
+    nub (Ext x Empty) = Ext x Empty
+
+instance Nubable (e ': s) => Nubable (e ': e ': s) where
+    nub (Ext _ (Ext e s)) = nub (Ext e s)
+
+instance {-# OVERLAPS #-} (Nub (e ': f ': s) ~ (e ': Nub (f ': s)),
+              Nubable (f ': s)) => Nubable (e ': f ': s) where
+    nub (Ext e (Ext f s)) = Ext e (nub (Ext f s))
+
+class Conder g where
+    cond :: Proxy g -> Set s -> Set t -> Set (If g s t)
+
+instance Conder 'True where
+    cond _ s _ = s
+
+instance Conder 'False where
+    cond _ _ t = t
+
+{- Filter out the elements less-than or greater-than-or-equal to the pivot -}
+class FilterV (f::Flag) p xs where
+    filterV :: Proxy f -> p -> Set xs -> Set (Filter f p xs)
+
+instance FilterV f p '[] where
+    filterV _ _ Empty      = Empty
+
+instance (Conder ((Cmp x p) == 'LT), FilterV 'FMin p xs) => FilterV 'FMin p (x ': xs) where
+    filterV f@Proxy p (Ext x xs) = cond (Proxy::(Proxy ((Cmp x p) == 'LT)))
+                                        (Ext x (filterV f p xs)) (filterV f p xs)
+
+instance (Conder (((Cmp x p) == 'GT) || ((Cmp x p) == 'EQ)), FilterV 'FMax p xs) => FilterV 'FMax p (x ': xs) where
+    filterV f@Proxy p (Ext x xs) = cond (Proxy::(Proxy (((Cmp x p) == 'GT) || ((Cmp x p) == 'EQ))))
+                                        (Ext x (filterV f p xs)) (filterV f p xs)
+
+{-| Access the value at a type present in a set. -}
+class Elem a s where
+  project :: Proxy a -> Set s -> a
+
+instance {-# OVERLAPS #-} Elem a (a ': s) where
+  project _ (Ext x _)  = x
+
+instance {-# OVERLAPPABLE #-} Elem a s => Elem a (b ': s) where
+  project p (Ext _ xs) = project p xs
+
+-- | Value level type list membership predicate: does the type 'a' show up in
+--   the type list 's'?
+class Member a s where
+  member :: Proxy a -> Set s -> Bool
+
+instance Member a '[] where
+  member _ Empty = False
+
+instance {-# OVERLAPS #-} Member a (a ': s) where
+  member _ (Ext _ _)  = True
+
+instance {-# OVERLAPPABLE #-} Member a s => Member a (b ': s) where
+  member p (Ext _ xs) = member p xs
 
 append :: Set s -> Set t -> Set (s :++ t)
 append Empty x = x
 append (Ext e xs) ys = Ext e (append xs ys)
 
-{-| Delete elements from a set -}
-type family (m :: [k]) :\ (x :: k) :: [k] where
-     '[]       :\ x = '[]
-     (x ': xs) :\ x = xs :\ x
-     (y ': xs) :\ x = y ': (xs :\ x)
+{-| Construct a subsetset 's' from a superset 't' -}
+class Subset s t where
+   subset :: Set t -> Set s
 
-class Remove s t where
-  remove :: Set s -> Proxy t -> Set (s :\ t)
+instance Subset '[] '[] where
+   subset _ = Empty
 
-instance Remove '[] t where
-  remove Empty Proxy = Empty
+instance {-# OVERLAPPABLE #-} Subset s t => Subset s (x ': t) where
+   subset (Ext _ xs) = subset xs
 
-instance {-# OVERLAPS #-} Remove xs x => Remove (x ': xs) x where
-  remove (Ext _ xs) x@Proxy = remove xs x
-
-instance {-# OVERLAPPABLE #-} (((y : xs) :\ x) ~ (y : (xs :\ x)), Remove xs x)
-      => Remove (y ': xs) x where
-  remove (Ext y xs) (x@Proxy) = Ext y (remove xs x)
+instance {-# OVERLAPS #-} Subset s t => Subset (x ': s) (x ': t) where
+   subset (Ext x xs) = Ext x (subset xs)
 
 {-| Splitting a union a set, given the sets we want to split it into -}
 class Split s t st where
@@ -131,68 +184,18 @@ instance {-# OVERLAPS #-} (Split s t st) => Split s (x ': t) (x ': st) where
    split (Ext x st) = let (s, t) = split st
                       in  (s, Ext x t)
 
-{-| Remove duplicates from a sorted list -}
-type family Nub t where
-    Nub '[]           = '[]
-    Nub '[e]          = '[e]
-    Nub (e ': e ': s) = Nub (e ': s)
-    Nub (e ': f ': s) = e ': Nub (f ': s)
+class Remove s t where
+  remove :: Set s -> Proxy t -> Set (s :\ t)
 
-{-| Value-level counterpart to the type-level 'Nub'
-    Note: the value-level case for equal types is not define here,
-          but should be given per-application, e.g., custom 'merging' behaviour may be required -}
+instance Remove '[] t where
+  remove Empty Proxy = Empty
 
-class Nubable t where
-    nub :: Set t -> Set (Nub t)
+instance {-# OVERLAPS #-} Remove xs x => Remove (x ': xs) x where
+  remove (Ext _ xs) x@Proxy = remove xs x
 
-instance Nubable '[] where
-    nub Empty = Empty
-
-instance Nubable '[e] where
-    nub (Ext x Empty) = Ext x Empty
-
-instance Nubable (e ': s) => Nubable (e ': e ': s) where
-    nub (Ext _ (Ext e s)) = nub (Ext e s)
-
-instance {-# OVERLAPS #-} (Nub (e ': f ': s) ~ (e ': Nub (f ': s)),
-              Nubable (f ': s)) => Nubable (e ': f ': s) where
-    nub (Ext e (Ext f s)) = Ext e (nub (Ext f s))
-
-
-{-| Construct a subsetset 's' from a superset 't' -}
-class Subset s t where
-   subset :: Set t -> Set s
-
-instance Subset '[] '[] where
-   subset xs = Empty
-
-instance {-# OVERLAPPABLE #-} Subset s t => Subset s (x ': t) where
-   subset (Ext _ xs) = subset xs
-
-instance {-# OVERLAPS #-} Subset s t => Subset (x ': s) (x ': t) where
-   subset (Ext x xs) = Ext x (subset xs)
-
-
-{-| Type-level quick sort for normalising the representation of sets -}
-type family Sort (xs :: [k]) :: [k] where
-            Sort '[]       = '[]
-            Sort (x ': xs) = ((Sort (Filter FMin x xs)) :++ '[x]) :++ (Sort (Filter FMax x xs))
-
-data Flag = FMin | FMax
-
-type family Filter (f :: Flag) (p :: k) (xs :: [k]) :: [k] where
-            Filter f p '[]       = '[]
-            Filter FMin p (x ': xs) = If (Cmp x p == LT) (x ': (Filter FMin p xs)) (Filter FMin p xs)
-            Filter FMax p (x ': xs) = If (Cmp x p == GT || Cmp x p == EQ) (x ': (Filter FMax p xs)) (Filter FMax p xs)
-
-type family DeleteFromList (e :: elem) (list :: [elem]) where
-    DeleteFromList elem '[] = '[]
-    DeleteFromList elem (x ': xs) = If (Cmp elem x == EQ)
-                                       xs
-                                       (x ': DeleteFromList elem xs)
-
-type family Delete elem set where
-    Delete elem (Set xs) = Set (DeleteFromList elem xs)
+instance {-# OVERLAPPABLE #-} (((y : xs) :\ x) ~ (y : (xs :\ x)), Remove xs x)
+      => Remove (y ': xs) x where
+  remove (Ext y xs) (x@Proxy) = Ext y (remove xs x)
 
 {-| Value-level quick sort that respects the type-level ordering -}
 class Sortable xs where
@@ -201,70 +204,29 @@ class Sortable xs where
 instance Sortable '[] where
     quicksort Empty = Empty
 
-instance (Sortable (Filter FMin p xs),
-          Sortable (Filter FMax p xs), FilterV FMin p xs, FilterV FMax p xs) => Sortable (p ': xs) where
+instance (Sortable (Filter 'FMin p xs),
+          Sortable (Filter 'FMax p xs), FilterV 'FMin p xs, FilterV 'FMax p xs) => Sortable (p ': xs) where
     quicksort (Ext p xs) = ((quicksort (less p xs)) `append` (Ext p Empty)) `append` (quicksort (more p xs))
-                           where less = filterV (Proxy::(Proxy FMin))
-                                 more = filterV (Proxy::(Proxy FMax))
+                           where less = filterV (Proxy::(Proxy 'FMin))
+                                 more = filterV (Proxy::(Proxy 'FMax))
 
-{- Filter out the elements less-than or greater-than-or-equal to the pivot -}
-class FilterV (f::Flag) p xs where
-    filterV :: Proxy f -> p -> Set xs -> Set (Filter f p xs)
+type Unionable s t = (Sortable (s :++ t), Nubable (Sort (s :++ t)))
 
-instance FilterV f p '[] where
-    filterV _ p Empty      = Empty
+union :: (Unionable s t) => Set s -> Set t -> Set (UnionLists s t)
+union s t = nub (quicksort (append s t))
 
-instance (Conder ((Cmp x p) == LT), FilterV FMin p xs) => FilterV FMin p (x ': xs) where
-    filterV f@Proxy p (Ext x xs) = cond (Proxy::(Proxy ((Cmp x p) == LT)))
-                                        (Ext x (filterV f p xs)) (filterV f p xs)
+{-| At the value level, noramlise the list form to the set form -}
+asSet :: (Sortable s, Nubable (Sort s)) => Set s -> Set (AsSet s)
+asSet x = nub (quicksort x)
 
-instance (Conder (((Cmp x p) == GT) || ((Cmp x p) == EQ)), FilterV FMax p xs) => FilterV FMax p (x ': xs) where
-    filterV f@Proxy p (Ext x xs) = cond (Proxy::(Proxy (((Cmp x p) == GT) || ((Cmp x p) == EQ))))
-                                        (Ext x (filterV f p xs)) (filterV f p xs)
-
-class Conder g where
-    cond :: Proxy g -> Set s -> Set t -> Set (If g s t)
-
-instance Conder True where
-    cond _ s t = s
-
-instance Conder False where
-    cond _ s t = t
-
-{-| Open-family for the ordering operation in the sort -}
-
-type family Cmp (a :: k) (b :: k) :: Ordering
-
-{-| Access the value at a type present in a set. -}
-class Elem a s where
-  project :: Proxy a -> Set s -> a
-
-instance {-# OVERLAPS #-} Elem a (a ': s) where
-  project _ (Ext x _)  = x
-
-instance {-# OVERLAPPABLE #-} Elem a s => Elem a (b ': s) where
-  project p (Ext _ xs) = project p xs
-
--- | Value level type list membership predicate: does the type 'a' show up in
---   the type list 's'?
-class Member a s where
-  member :: Proxy a -> Set s -> Bool
-
-instance Member a '[] where
-  member _ Empty = False
-
-instance {-# OVERLAPS #-} Member a (a ': s) where
-  member _ (Ext x _)  = True
-
-instance {-# OVERLAPPABLE #-} Member a s => Member a (b ': s) where
-  member p (Ext _ xs) = member p xs
-
--- | Type level type list membership predicate: does the type 'a' show up in the
---   type list 's'?
---type MemberP :: k -> [k] -> Bool
-type family MemberP a s :: Bool where
-            MemberP a '[]      = False
-            MemberP a (a ': s) = True
-            MemberP a (b ': s) = MemberP a s
-
-type NonMember a s = MemberP a s ~ False
+{-| Useful properties to be able to refer to someties -}
+type SetProperties (f :: [k]) =
+  ( UnionLists f ('[] :: [k]) ~ f,
+    Split f ('[] :: [k]) f,
+    UnionLists ('[] :: [k]) f ~ f,
+    Split ('[] :: [k]) f f,
+    UnionLists f f ~ f,
+    Split f f f,
+    Unionable f ('[] :: [k]),
+    Unionable ('[] :: [k]) f
+  )

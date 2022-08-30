@@ -83,7 +83,8 @@ library
   other-extensions:     TypeInType
 
 
-  exposed-modules:      Data.Type.Set
+  exposed-modules:      Data.Type.List
+                        Data.Type.Set
                         Data.Type.Map
 
   build-depends:        base < 5,

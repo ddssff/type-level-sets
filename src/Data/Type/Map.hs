@@ -7,20 +7,21 @@ The implementation is similar to that shown in the paper.
              FlexibleInstances, GADTs, FlexibleContexts, ScopedTypeVariables,
              ConstraintKinds, IncoherentInstances #-}
 
-module Data.Type.Map (Mapping(..), Union, Unionable, union, append, Var(..), Map(..),
+module Data.Type.Map (Mapping(..), Unionable, union, append, Var(..), Map(..),
                         ext, empty, mapLength,
-                        Combine, Combinable(..), Cmp,
+                        Combine, Combinable(..),
                         Nubable, nub,
-                        Lookup, Member, (:\), Split, split,
+                        Lookup, Member, Split, split,
                         IsMember, lookp, Updatable, update,
                         IsMap, AsMap, asMap,
                         Sortable, quicksort,
                         Submap, submap) where
 
 import GHC.TypeLits
+import Data.Proxy (Proxy(Proxy))
 import Data.Type.Bool
 import Data.Type.Equality
-import Data.Type.Set (Cmp, Proxy(..), Flag(..), Sort, Filter, (:++))
+import Data.Type.List (Cmp, Flag(..), Sort, Filter, UnionLists, (:++))
 
 {- Throughout, type variables
    'k' ranges over "keys"
@@ -168,7 +169,6 @@ append :: Map s -> Map t -> Map (s :++ t)
 append Empty x = x
 append (Ext k v xs) ys = Ext k v (append xs ys)
 
-type instance Cmp (k :: Symbol) (k' :: Symbol) = CmpSymbol k k'
 type instance Cmp (k :-> v) (k' :-> v') = CmpSymbol k k'
 
 {-| Value-level quick sort that respects the type-level ordering -}
