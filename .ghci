@@ -1,0 +1,15 @@
+:set -isrc
+:set -XDataKinds
+:set -XTypeOperators
+:set -XGADTs
+:set -XKindSignatures
+:set -XTypeOperators
+:set -XTypeFamilies
+:set -XMultiParamTypeClasses
+:set -XFlexibleInstances
+:set -XPolyKinds
+:set -XFlexibleContexts
+:set -XUndecidableInstances
+:set -XConstraintKinds
+:set -XScopedTypeVariables
+:set -XTypeInType
