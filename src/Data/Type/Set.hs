@@ -3,9 +3,10 @@
              FlexibleContexts, UndecidableInstances, ConstraintKinds,
              ScopedTypeVariables, TypeInType #-}
 
-module Data.Type.Set (Set(..), Union, Insert, Unionable, union, quicksort, append,
+module Data.Type.Set (Set(Empty, Ext), ToSet, Union, Insert, Unionable, union, quicksort, append,
                       Sortable, Split(..), Nubable(..), asSet, Subset(..),
-                      Delete, remove, Remove, Elem(..), Member(..), SetProperties) where
+                      Delete, remove, Remove, Elem(..), Member(..), SetProperties,
+                      module Data.Type.List, Proxy(Proxy)) where
 
 import Data.Type.Bool
 import Data.Type.Equality
