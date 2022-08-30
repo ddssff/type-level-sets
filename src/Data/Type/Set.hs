@@ -3,7 +3,8 @@
              FlexibleContexts, UndecidableInstances, ConstraintKinds,
              ScopedTypeVariables, TypeInType #-}
 
-module Data.Type.Set (Set(Empty, Ext), ToSet, Union, Insert, Unionable, union, quicksort, append,
+module Data.Type.Set (Set(Empty, Ext), ToSet, Element, NotElement,
+                      Union, Insert, Unionable, union, quicksort, append,
                       Sortable, Split(..), Nubable(..), asSet, Subset(..),
                       Delete, Difference, Intersection, remove, Remove, Elem(..), Member(..), SetProperties,
                       module Data.Type.List, Proxy(Proxy)) where
@@ -56,6 +57,15 @@ instance (Ord a, Ord (Set s)) => Ord (Set (a ': s)) where
 --     = Set '["A", "B"]
 type ToSet xs = Set (AsSet xs)
 
+type family ElementP x s where
+  ElementP x (Set '[]) = 'False
+  ElementP x (Set (x ': xs)) = 'True
+  ElementP x (Set (y ': xs)) = ElementP x (Set xs)
+
+-- | Set membership constraints
+type Element x s = ElementP x s ~ 'True
+type NotElement x s = ElementP x s ~ 'False
+
 type Delete x xs = Difference xs (ToSet '[x])
 
 -- | > :kind! Difference (Set '["A", "B"]) (Set '["B"])
@@ -78,7 +88,6 @@ type family Intersection a b where
     Union (If (MemberP x ys) (Set '[x]) (Set '[])) (Intersection (Set xs) (Difference (Set ys) (Set '[x])))
 
 type Insert x s = Union (Set '[x]) s
-
 
 {-| Value-level counterpart to the type-level 'Nub'
     Note: the value-level case for equal types is not define here,
